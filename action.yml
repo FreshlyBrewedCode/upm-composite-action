@@ -1,0 +1,52 @@
+name: "UPM Release"
+description: "Triggers a new release using semantic release and creates a matching UPM branch and tag."
+inputs:
+    root:
+        description: "Root path of the UPM package."
+        required: true
+        default: "/"
+    branch:
+        description: "Name of the UPM branch."
+        required: false
+        default: "upm"
+outputs:
+runs:
+    using: "composite"
+    steps:
+        - uses: actions/checkout@v2
+          with:
+              fetch-depth: 0
+
+        - name: Semantic Release
+          id: semantic
+          uses: cycjimmy/semantic-release-action@v2.1.3
+          with:
+              extra_plugins: |
+                  @semantic-release/changelog
+                  @semantic-release/git
+              branch: master
+          env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              pkgRoot: ${{ inputs.root }}
+
+        - name: Create UPM branch
+          run: |
+              git branch -d ${{ inputs.branch }} &> /dev/null || echo upm branch not found
+              git subtree split -P "${{ inputs.root }}" -b ${{ inputs.branch }}
+              git checkout ${{ inputs.branch }}
+              if [[ -d "Samples" ]]; then
+                git mv Samples Samples~
+                rm -f Samples.meta
+                git config --global user.name 'github-bot'
+                git config --global user.email 'github-bot@users.noreply.github.com'
+                git commit -am "fix: Samples => Samples~"
+              fi
+              git push -f -u origin ${{ inputs.branch }}
+
+        - name: Create UPM git tag
+          if: steps.semantic.outputs.new_release_published == 'true'
+          run: |
+              git tag $TAG ${{ inputs.branch }}
+              git push origin --tags
+          env:
+              TAG: ${{ inputs.branch }}/v${{ steps.semantic.outputs.new_release_version }}
